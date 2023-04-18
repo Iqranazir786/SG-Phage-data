@@ -1,0 +1,64 @@
+#!/bin/sh -l
+
+#SBATCH --nodes=1                 ##number of requested nodes (a node is a group of CPUs)
+#SBATCH -n 12                      ##number of requested CPUs
+#SBATCH --time=04:00:00             ##time requested
+#SBATCH --job-name soil_pipeline2    ##name of job
+#SBATCH -A microbiome                 ##name of the queue you are using. Could be scholar or microbiome if you are on snyder
+
+#########################################################################
+
+echo "Start time"
+date +"%d %B %Y %H:%M:%S"
+
+#step 1, cd into the proper directory. This directory must already exist
+
+cd $RCAC_SCRATCH
+cd phage-trial-sequence-data/phage-trial-sequence-data/hr03404_SG-Trial/input-files2
+
+pwd
+
+#step 2, Load Modules
+
+echo "loading bioinfo"
+module load bioinfo
+
+echo "loading qiime2-2022.8"
+module load Qiime/2-2022.8
+
+#step 3, Run the code you want
+
+
+#echo "dada2"
+
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs demux.qza \
+  --p-trim-left-f 13 \
+  --p-trim-left-r 13 \
+  --p-trunc-len-f 250 \
+  --p-trunc-len-r 250 \
+  --o-table table.qza \
+  --o-representative-sequences rep-seqs.qza \
+  --o-denoising-stats denoising-stats.qza
+
+#Convert .qza to .qzv format
+
+qiime feature-table summarize \
+  --i-table table.qza \
+  --o-visualization table.qzv \
+  --m-sample-metadata-file metadata-SG.txt
+
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+qiime metadata tabulate \
+  --m-input-file denoising-stats.qza \
+  --o-visualization denoising-stats.qzv
+
+
+
+echo "End time"
+date +"%d %B %Y %H:%M:%S"
+
+#to run: sbatch step2-SG.slurm
