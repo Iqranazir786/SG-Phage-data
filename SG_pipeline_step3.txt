@@ -1,0 +1,224 @@
+#!/bin/sh -l
+
+#SBATCH --nodes=1                 ##number of requested nodes (a node is a group of CPUs)
+#SBATCH -n 48		           ##number of requested CPUs
+#SBATCH --time=12:00:00             ##time requested
+#SBATCH --job-name Project_pipeline    ##name of job
+#SBATCH -A microbiome                 ##name of the queue you are using. Could be scholar or microbiome if you are on snyder
+
+#########################################################################
+
+echo "Start time"
+date +"%d %B %Y %H:%M:%S"
+
+#step 1, cd into the proper directory. This directory must already exist
+
+cd $RCAC_SCRATCH
+cd phage-trial-sequence-data/phage-trial-sequence-data/hr03404_SG-Trial/input-files
+pwd
+
+#step 2, Load Modules
+
+echo "loading bioinfo"
+module load bioinfo
+
+echo "loading qiime2-2022.8"
+module load Qiime/2-2022.8
+
+#step 3, Run the code you want
+
+echo "initiating qiime2 pipeline"
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+
+#Calculate diversity metrics. You will need to designate a sampling depth. You might want to consult the rarifaction output prior to this step.
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 8095 \
+  --m-metadata-file metadata-SG.txt \
+  --output-dir core-metrics-results
+
+qiime diversity alpha \
+  --i-table table.qza \
+  --p-metric chao1 \
+  --o-alpha-diversity core-metrics-results/chao1_vector.qza
+
+#qiime diversity alpha \
+ # --i-table table.qza \
+ # --p-metric simpson \
+ # --o-alpha-diversity core-metrics-results/simpson_vector.qza
+
+qiime diversity alpha \
+  --i-table table.qza \
+  --p-metric shannon \
+  --o-alpha-diversity core-metrics-results/shannon_vector.qza
+
+
+#Statistical testing
+
+qiime diversity alpha-correlation \
+--i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+--m-metadata-file metadata-SG.txt \
+--o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+#qiime diversity alpha-correlation \
+  #--i-alpha-diversity core-metrics-results/evenness_vector.qza \
+  #--m-metadata-file metadata-SG.txt \
+  #--o-visualization core-metrics-results/evenness-group-significance.qzv
+
+qiime diversity alpha-correlation \
+  --i-alpha-diversity core-metrics-results/shannon_vector.qza \
+  --m-metadata-file metadata-SG.txt \
+  --o-visualization core-metrics-results/shannon-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/observed_features_vector.qza \
+  --m-metadata-file metadata-SG.txt \
+  --o-visualization core-metrics-results/observed_features_vector.qzv
+
+#qiime diversity alpha-correlation \
+  #--i-alpha-diversity core-metrics-results/simpson_vector.qza \
+  #--m-metadata-file metadata-SG.txt \
+  #--o-visualization core-metrics-results/simpson-group-significance.qzv
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/Last-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Necropsy \        
+  --o-visualization core-metrics-results/unweighted-unifrac-Necropsy-significance.qzv
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-method 'permdisp' \
+  --m-metadata-column Necropsy \
+  --o-visualization core-metrics-results/unweighted-unifrac-Necropsy-permdisp-significance.qzv
+
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/Last-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Treat \        
+  --o-visualization core-metrics-results/unweighted-unifrac-Treat-significance.qzv
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-method 'permdisp' \
+  --m-metadata-column Treat \
+  --o-visualization core-metrics-results/unweighted-unifrac-Treat-permdisp-significance.qzv
+
+qiime diversity alpha-rarefaction \
+  --i-table table.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 20000 \
+  --m-metadata-file metadata-SG.txt \
+  --o-visualization alpha-rarefaction.qzv
+
+#echo "Classify and get .qzv"
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-classifier-v3v4.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file taxonomy.qza \
+  --o-visualization taxonomy.qzv
+
+
+echo "Make a stacked barplot"
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file metadata-SG.tsv \
+  --o-visualization taxa-bar-plots.qzv
+
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-where "[Necropsy]='First'" \
+  --o-filtered-table First-table.qza
+
+qiime feature-table filter-samples \
+  --i-table table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-where "[Necropsy]='Last'" \
+  --o-filtered-table Last-table.qza
+
+qiime feature-table filter-samples \
+  --i-table First-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-where "Treat" \
+  --o-filtered-table First-Treat-table.qza
+
+qiime feature-table filter-samples \
+  --i-table Last-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --p-where "[Treat]" \
+  --o-filtered-table Last-Treat-table.qza
+
+qiime composition add-pseudocount \
+  --i-table First-table.qza \
+  --o-composition-table comp-First-table.qza
+
+qiime composition add-pseudocount \
+  --i-table Last-table.qza \
+  --o-composition-table comp-Last-table.qza
+
+qiime composition ancom \
+  --i-table comp-First-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Treat \
+  --o-visualization ancom-First-Treat.qzv
+
+qiime composition ancom \
+  --i-table comp-Last-table.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Treat \
+  --o-visualization ancom-Last-Treat.qzv
+
+qiime taxa collapse \
+  --i-table First-table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-level 6 \
+  --o-collapsed-table First-table-l6.qza
+
+qiime composition add-pseudocount \
+  --i-table First-table-l6.qza \
+  --o-composition-table comp-First-table-l6.qza
+
+qiime composition ancom \
+  --i-table comp-First-table-l6.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Treat \
+  --o-visualization l6-ancom-FirstTreat.qzv
+
+qiime taxa collapse \
+  --i-table Last-table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-level 6 \
+  --o-collapsed-table Last-table-l6.qza
+
+qiime composition add-pseudocount \
+  --i-table Last-table-l6.qza \
+  --o-composition-table comp-Last-table-l6.qza
+
+qiime composition ancom \
+  --i-table comp-Last-table-l6.qza \
+  --m-metadata-file metadata-SG.txt \
+  --m-metadata-column Treat \
+  --o-visualization l6-ancom-LastTreat.qzv
+
+echo "End time"
+date +"%d %B %Y %H:%M:%S"
+
+#to run: sbatch SG_pipeline.slurm
